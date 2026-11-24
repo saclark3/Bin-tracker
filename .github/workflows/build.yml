@@ -23,5 +23,5 @@ jobs:
             -project BinTracker.xcodeproj \
             -scheme BinTracker \
             -destination 'generic/platform=iOS Simulator' \
-            CODE_SIGNING_ALLOWED=NO 2>&1 | grep -E "error:|warning:|BUILD" || true
-          test ${PIPESTATUS[0]} -eq 0
+            CODE_SIGNING_ALLOWED=NO > build.log 2>&1 || { grep -E "error:" build.log; tail -50 build.log; exit 1; }
+          grep -E "warning:|BUILD" build.log || true
