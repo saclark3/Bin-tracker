@@ -31,8 +31,8 @@ enum BinCode {
     static func next(in context: ModelContext) -> String {
         let bins = (try? context.fetch(FetchDescriptor<Bin>())) ?? []
         let used = Set(bins.map { normalize($0.code) })
-        let numbers = bins.compactMap { code -> Int? in
-            let c = normalize(code)
+        let numbers = bins.compactMap { (bin: Bin) -> Int? in
+            let c = normalize(bin.code)
             guard c.hasPrefix(prefix) else { return nil }
             return Int(c.dropFirst(prefix.count))
         }
