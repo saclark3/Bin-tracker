@@ -1,0 +1,22 @@
+name: BinTracker
+options:
+  bundleIdPrefix: com.example
+  deploymentTarget:
+    iOS: "17.0"
+targets:
+  BinTracker:
+    type: application
+    platform: iOS
+    sources: [BinTracker]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.example.bintracker
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Bins
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.9"
+        MARKETING_VERSION: "0.1"
+        CURRENT_PROJECT_VERSION: "1"
