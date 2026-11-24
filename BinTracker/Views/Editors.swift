@@ -1,26 +1,24 @@
 import SwiftUI
-import SwiftData
 
 // MARK: - Bin editor (new + edit)
 struct BinEditorView: View {
-    @Environment(\.modelContext) private var context
+    @Environment(HouseholdStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \Area.name) private var areas: [Area]
 
     let bin: Bin?
-    var onCreate: ((Bin) -> Void)? = nil
-    var presetLocation: StorageLocation? = nil
+    var presetSpotId: String?
+    var onCreate: ((String) -> Void)?
 
     @State private var code = ""
     @State private var name = ""
     @State private var notes = ""
     @State private var colorName = BinColor.blue.rawValue
-    @State private var location: StorageLocation?
+    @State private var spotId: String?
     @State private var loaded = false
 
-    init(bin: Bin?, presetLocation: StorageLocation? = nil, onCreate: ((Bin) -> Void)? = nil) {
+    init(bin: Bin?, presetSpotId: String? = nil, onCreate: ((String) -> Void)? = nil) {
         self.bin = bin
-        self.presetLocation = presetLocation
+        self.presetSpotId = presetSpotId
         self.onCreate = onCreate
     }
 
@@ -28,7 +26,7 @@ struct BinEditorView: View {
         let c = BinCode.normalize(code)
         if c.isEmpty { return "Enter an ID to write on the box." }
         if c.count > BinCode.maxLength { return "Keep it to \(BinCode.maxLength) characters or fewer so it's easy to write." }
-        if BinCode.isTaken(c, excluding: bin, in: context) { return "\(c) is already used by another bin." }
+        if store.isTaken(c, excluding: bin?.id) { return "\(c) is already used by another bin." }
         return nil
     }
 
@@ -41,9 +39,10 @@ struct BinEditorView: View {
                             .font(.system(.title, design: .rounded).weight(.heavy))
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
-                        BinBadge(code: BinCode.normalize(code).isEmpty ? "?" : BinCode.normalize(code), colorName: colorName)
+                        let shown = BinCode.normalize(code)
+                        BinBadge(code: shown.isEmpty ? "?" : shown, colorName: colorName)
                     }
-                    if let codeError, !code.isEmpty || bin != nil {
+                    if let codeError, loaded {
                         Text(codeError).font(.footnote).foregroundStyle(.red)
                     }
                 } header: {
@@ -65,18 +64,18 @@ struct BinEditorView: View {
                 }
 
                 Section {
-                    Picker("Location", selection: $location) {
-                        Text("Not set").tag(StorageLocation?.none)
-                        ForEach(areas) { area in
-                            ForEach(area.sortedLocations) { loc in
-                                Text(loc.fullPath).tag(StorageLocation?.some(loc))
+                    Picker("Location", selection: $spotId) {
+                        Text("Not set").tag(String?.none)
+                        ForEach(store.areas) { area in
+                            ForEach(store.spots(in: area)) { spot in
+                                Text(store.path(of: spot)).tag(String?.some(spot.id))
                             }
                         }
                     }
                 } header: {
                     Text("Where is it?")
                 } footer: {
-                    if areas.allSatisfy({ $0.locations.isEmpty }) {
+                    if store.spots.isEmpty {
                         Text("Add areas and spots in the Areas tab to pick a location here.")
                     }
                 }
@@ -95,25 +94,26 @@ struct BinEditorView: View {
 
     private func load() {
         guard !loaded else { return }
-        loaded = true
         if let bin {
             code = bin.code; name = bin.name; notes = bin.notes
-            colorName = bin.colorName; location = bin.location
+            colorName = bin.colorName; spotId = bin.spotId
         } else {
-            code = BinCode.next(in: context)
-            location = presetLocation
+            code = store.nextCode
+            spotId = presetSpotId
         }
+        loaded = true
     }
 
     private func save() {
         let c = BinCode.normalize(code)
-        if let bin {
-            bin.code = c; bin.name = name; bin.notes = notes
-            bin.colorName = colorName; bin.location = location
+        if var existing = bin {
+            existing.code = c; existing.name = name; existing.notes = notes
+            existing.colorName = colorName; existing.spotId = spotId
+            store.updateBin(existing)
         } else {
-            let new = Bin(code: c, name: name, notes: notes, colorName: colorName, location: location)
-            context.insert(new)
-            onCreate?(new)
+            let newId = store.createBin(Bin(id: "", code: c, name: name, notes: notes,
+                                            colorName: colorName, spotId: spotId))
+            onCreate?(newId)
         }
         dismiss()
     }
@@ -121,17 +121,15 @@ struct BinEditorView: View {
 
 // MARK: - Item editor
 struct ItemEditorView: View {
-    @Environment(\.modelContext) private var context
+    @Environment(HouseholdStore.self) private var store
     @Environment(\.dismiss) private var dismiss
-    @Query(sort: \Bin.code) private var allBins: [Bin]
 
-    @Bindable var item: Item
-    let bin: Bin
+    let item: Item
 
     @State private var name = ""
     @State private var quantity = 1
     @State private var notes = ""
-    @State private var targetBin: Bin?
+    @State private var binId = ""
     @State private var loaded = false
 
     var body: some View {
@@ -143,16 +141,15 @@ struct ItemEditorView: View {
                     TextField("Notes", text: $notes, axis: .vertical)
                 }
                 Section("Move to another bin") {
-                    Picker("Bin", selection: $targetBin) {
-                        ForEach(allBins) { b in
-                            Text(b.name.isEmpty ? b.code : "\(b.code) · \(b.name)").tag(Bin?.some(b))
+                    Picker("Bin", selection: $binId) {
+                        ForEach(store.bins.sorted { $0.code.localizedStandardCompare($1.code) == .orderedAscending }) { b in
+                            Text(b.name.isEmpty ? b.code : "\(b.code) · \(b.name)").tag(b.id)
                         }
                     }
                 }
                 Section {
                     Button("Remove from bin", role: .destructive) {
-                        context.delete(item)
-                        AccessLogger.log(.edited, for: bin, in: context)
+                        store.deleteItem(item)
                         dismiss()
                     }
                 }
@@ -169,21 +166,18 @@ struct ItemEditorView: View {
             .onAppear {
                 guard !loaded else { return }
                 loaded = true
-                name = item.name; quantity = item.quantity; notes = item.notes; targetBin = bin
+                name = item.name; quantity = item.quantity; notes = item.notes; binId = item.binId
             }
         }
     }
 
     private func save() {
-        item.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        item.quantity = quantity
-        item.notes = notes
-        item.updatedAt = .now
-        if let targetBin, targetBin !== bin {
-            item.bin = targetBin
-            AccessLogger.log(.edited, for: targetBin, in: context)
-        }
-        AccessLogger.log(.edited, for: bin, in: context)
+        var updated = item
+        updated.name = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        updated.quantity = quantity
+        updated.notes = notes
+        updated.binId = binId
+        store.updateItem(updated, previousBinId: item.binId)
         dismiss()
     }
 }

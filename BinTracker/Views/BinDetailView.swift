@@ -1,23 +1,32 @@
 import SwiftUI
-import SwiftData
 
 struct BinDetailView: View {
-    @Environment(\.modelContext) private var context
-    @Bindable var bin: Bin
+    @Environment(HouseholdStore.self) private var store
+    let binId: String
 
     @State private var quickItem = ""
     @State private var editingItem: Item?
     @State private var showingEditBin = false
     @State private var showingHistory = false
+    @State private var loggedView = false
     @FocusState private var quickFocused: Bool
 
     var body: some View {
+        if let bin = store.bin(binId) {
+            content(bin)
+        } else {
+            ContentUnavailableView("Bin not found", systemImage: "shippingbox",
+                                   description: Text("It may have been deleted on another device."))
+        }
+    }
+
+    private func content(_ bin: Bin) -> some View {
         List {
             Section {
                 VStack(spacing: 8) {
                     BinBadge(code: bin.code, colorName: bin.colorName, large: true)
                     if !bin.name.isEmpty { Text(bin.name).font(.title3.bold()) }
-                    Label(bin.locationPath, systemImage: "mappin.and.ellipse")
+                    Label(store.locationPath(of: bin), systemImage: "mappin.and.ellipse")
                         .foregroundStyle(.secondary)
                     if !bin.notes.isEmpty {
                         Text(bin.notes).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
@@ -27,29 +36,30 @@ struct BinDetailView: View {
                 .listRowBackground(Color.clear)
             }
 
-            Section("Contents (\(bin.items.count))") {
+            let items = store.items(in: bin)
+            Section("Contents (\(items.count))") {
                 HStack {
                     TextField("Add an item…", text: $quickItem)
                         .focused($quickFocused)
                         .submitLabel(.done)
-                        .onSubmit(addQuickItem)
-                    Button(action: addQuickItem) { Image(systemName: "plus.circle.fill").font(.title2) }
+                        .onSubmit { addQuickItem(to: bin) }
+                    Button { addQuickItem(to: bin) } label: { Image(systemName: "plus.circle.fill").font(.title2) }
                         .disabled(quickItem.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
-                ForEach(bin.sortedItems) { item in
+                ForEach(items) { item in
                     Button { editingItem = item } label: { ItemRow(item: item) }
                         .tint(.primary)
                 }
-                .onDelete(perform: deleteItems)
+                .onDelete { offsets in offsets.forEach { store.deleteItem(items[$0]) } }
             }
 
             Section("Usage") {
                 LabeledContent("Last accessed", value: bin.lastAccessed?.relativeDescription ?? "Never")
-                LabeledContent("Last 7 days", value: "\(bin.accessCount(sinceDaysAgo: 7))×")
-                LabeledContent("Last 30 days", value: "\(bin.accessCount(sinceDaysAgo: 30))×")
-                LabeledContent("All time", value: "\(bin.totalAccessCount)×")
+                LabeledContent("Last 7 days", value: "\(store.accessCount(bin, days: 7))×")
+                LabeledContent("Last 30 days", value: "\(store.accessCount(bin, days: 30))×")
+                LabeledContent("All time", value: "\(bin.accessCount)×")
                 Button {
-                    AccessLogger.log(.opened, for: bin, in: context)
+                    store.logAccess(.opened, for: bin)
                 } label: {
                     Label("I just opened this box", systemImage: "shippingbox.and.arrow.backward")
                 }
@@ -58,30 +68,23 @@ struct BinDetailView: View {
         }
         .navigationTitle(bin.code)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar {
-            Button("Edit") { showingEditBin = true }
+        .toolbar { Button("Edit") { showingEditBin = true } }
+        .onAppear {
+            guard !loggedView else { return }
+            loggedView = true
+            store.logAccess(.viewed, for: bin)
         }
-        .onAppear { AccessLogger.log(.viewed, for: bin, in: context) }
-        .sheet(item: $editingItem) { ItemEditorView(item: $0, bin: bin) }
+        .sheet(item: $editingItem) { ItemEditorView(item: $0) }
         .sheet(isPresented: $showingEditBin) { BinEditorView(bin: bin) }
         .sheet(isPresented: $showingHistory) { AccessHistoryView(bin: bin) }
     }
 
-    private func addQuickItem() {
+    private func addQuickItem(to bin: Bin) {
         let name = quickItem.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { return }
-        let item = Item(name: name)
-        context.insert(item)
-        bin.items.append(item)
-        AccessLogger.log(.edited, for: bin, in: context)
+        store.addItem(named: name, to: bin)
         quickItem = ""
         quickFocused = true   // keep keyboard up for rapid entry while packing a box
-    }
-
-    private func deleteItems(at offsets: IndexSet) {
-        let list = bin.sortedItems
-        for i in offsets { context.delete(list[i]) }
-        AccessLogger.log(.edited, for: bin, in: context)
     }
 }
 
@@ -106,17 +109,26 @@ struct ItemRow: View {
 
 struct AccessHistoryView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(HouseholdStore.self) private var store
     let bin: Bin
 
     var body: some View {
         NavigationStack {
             List {
-                if bin.accessEvents.isEmpty {
-                    Text("No activity yet").foregroundStyle(.secondary)
+                let events = store.events(for: bin)
+                if events.isEmpty {
+                    Text("No activity in the last \(HouseholdStore.historyDays) days").foregroundStyle(.secondary)
                 }
-                ForEach(bin.recentEvents) { event in
+                ForEach(events) { event in
                     HStack {
-                        Label(event.kind.label, systemImage: event.kind.symbol)
+                        Label {
+                            VStack(alignment: .leading) {
+                                Text(event.kind.label)
+                                if !event.by.isEmpty {
+                                    Text(event.by).font(.caption).foregroundStyle(.secondary)
+                                }
+                            }
+                        } icon: { Image(systemName: event.kind.symbol) }
                         Spacer()
                         Text(event.date, format: .dateTime.month().day().hour().minute())
                             .foregroundStyle(.secondary).font(.caption)
