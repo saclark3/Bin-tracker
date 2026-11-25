@@ -33,9 +33,6 @@ jobs:
           fi
 
       - uses: actions/checkout@v4
-      # App Store Connect requires apps built with the iOS 26 SDK (Xcode 26) or later.
-      - name: Show Xcode version
-        run: xcodebuild -version
 
       - name: Select Xcode 26
         run: |
