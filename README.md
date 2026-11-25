@@ -45,7 +45,7 @@ The free Firebase "Spark" plan allows 50,000 reads and 20,000 writes a day, far 
 
 ## Building
 
-Builds run on GitHub (see `.github/workflows/build.yml`). To build on a Mac with Xcode 16 or later:
+Builds run on GitHub (see `.github/workflows/build.yml`). To build on a Mac with Xcode 26 or later:
 ```
 brew install xcodegen
 xcodegen generate
