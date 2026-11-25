@@ -21,6 +21,7 @@ final class HouseholdStore {
     private(set) var items: [Item] = []
     private(set) var categories: [BinCategory] = []
     private(set) var events: [AccessEvent] = []
+    private(set) var pickLists: [PickList] = []
     private(set) var lastError: String?
 
     /// GUESS: plain "viewed" events within this window of the last access are skipped,
@@ -31,12 +32,14 @@ final class HouseholdStore {
 
     @ObservationIgnored private let db = Firestore.firestore()
     @ObservationIgnored private var listeners: [ListenerRegistration] = []
+    @ObservationIgnored private var watchSyncTask: Task<Void, Never>?
 
     init(householdId: String, uid: String, userName: String) {
         self.householdId = householdId
         self.uid = uid
         self.userName = userName
         start()
+        WatchBridge.shared.householdDidStart(self)
     }
 
     private var root: DocumentReference { db.collection("households").document(householdId) }
@@ -54,6 +57,7 @@ final class HouseholdStore {
                 self.inviteCode = d["inviteCode"] as? String ?? ""
                 let names = d["memberNames"] as? [String: String] ?? [:]
                 self.memberNames = names.values.sorted()
+                self.scheduleWatchSync()
             }
         })
         listen("areas") { [weak self] docs in
@@ -69,6 +73,9 @@ final class HouseholdStore {
         listen("categories") { [weak self] docs in
             self?.categories = docs.compactMap(BinCategory.init).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         }
+        listen("pickLists") { [weak self] docs in
+            self?.pickLists = docs.compactMap(PickList.init).sorted { $0.createdAt > $1.createdAt }
+        }
         let cutoff = Calendar.current.date(byAdding: .day, value: -Self.historyDays, to: .now) ?? .distantPast
         listen("events", query: col("events").whereField("date", isGreaterThan: cutoff)) { [weak self] docs in
             self?.events = docs.compactMap(AccessEvent.init).sorted { $0.date > $1.date }
@@ -82,6 +89,7 @@ final class HouseholdStore {
             MainActor.assumeIsolated {
                 if let error { self?.lastError = error.localizedDescription; return }
                 apply(snap?.documents ?? [])
+                if name != "events" { self?.scheduleWatchSync() }
             }
         })
     }
@@ -89,6 +97,45 @@ final class HouseholdStore {
     func stop() {
         listeners.forEach { $0.remove() }
         listeners.removeAll()
+        watchSyncTask?.cancel()
+        WatchBridge.shared.householdDidStop(self)
+    }
+
+    // MARK: - Apple Watch
+
+    /// Sends the watch a fresh copy shortly after changes settle (snapshots arrive in bursts).
+    private func scheduleWatchSync() {
+        watchSyncTask?.cancel()
+        watchSyncTask = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(1.5))
+            guard !Task.isCancelled, let self else { return }
+            WatchBridge.shared.publish(self.watchSnapshot())
+        }
+    }
+
+    /// What the watch needs: every bin with its items, and every pick list in walking order.
+    func watchSnapshot() -> WatchSnapshot {
+        let watchBins = bins
+            .sorted { $0.code.localizedStandardCompare($1.code) == .orderedAscending }
+            .map { bin in
+                WatchBin(id: bin.id, code: bin.code, name: bin.name, colorName: bin.colorName,
+                         location: locationPath(of: bin), lastAccessed: bin.lastAccessed,
+                         items: items(in: bin).map { WatchItem(id: $0.id, name: $0.name, quantity: $0.quantity) })
+            }
+        let lists = pickLists.map { list in
+            WatchPickList(id: list.id, name: list.name, createdAt: list.createdAt,
+                          entries: bins(in: list).map { bin in
+                              WatchPickEntry(binId: bin.id, code: bin.code, name: bin.name, colorName: bin.colorName,
+                                             location: locationPath(of: bin), picked: list.isPicked(bin),
+                                             items: chosenItems(in: list, bin: bin).map {
+                                                 WatchPickItem(id: $0.id, name: $0.name, quantity: $0.quantity,
+                                                               picked: list.isPicked($0))
+                                             })
+                          })
+        }
+        return WatchSnapshot(householdName: householdName.isEmpty ? "Household" : householdName,
+                             generatedAt: .now, bins: watchBins, pickLists: lists,
+                             appliedCommandIds: WatchBridge.shared.appliedCommandIds)
     }
 
     nonisolated private func report(_ error: Error?) {
@@ -133,10 +180,43 @@ final class HouseholdStore {
     func items(in bin: Bin) -> [Item] { items.filter { $0.binId == bin.id } }
     func events(for bin: Bin) -> [AccessEvent] { events.filter { $0.binId == bin.id } }
 
-    func accessCount(_ bin: Bin, days: Int) -> Int {
-        listen("categories") { [weak self] docs in
-            self?.categories = docs.compactMap(BinCategory.init).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    func pickList(_ id: String?) -> PickList? { pickLists.first { $0.id == id } }
+
+    /// Bins on the list (plus the current bin of any chosen item that has since moved),
+    /// sorted by location so the list reads in the order you'd walk to them.
+    func bins(in list: PickList) -> [Bin] {
+        var ids = list.binIds
+        for item in items where list.itemIds.contains(item.id) && !ids.contains(item.binId) { ids.append(item.binId) }
+        return ids.compactMap { bin($0) }.sorted {
+            let a = locationPath(of: $0), b = locationPath(of: $1)
+            if a != b {
+                // Bins without a location go last.
+                if spot($0.spotId) == nil { return false }
+                if spot($1.spotId) == nil { return true }
+                return a.localizedStandardCompare(b) == .orderedAscending
+            }
+            return $0.code.localizedStandardCompare($1.code) == .orderedAscending
         }
+    }
+
+    /// Specific items to pull from this bin (empty means "grab the whole bin").
+    func chosenItems(in list: PickList, bin: Bin) -> [Item] {
+        items.filter { $0.binId == bin.id && list.itemIds.contains($0.id) }
+    }
+
+    /// (checked off, total). Each bin counts once and each chosen item counts once.
+    func progress(of list: PickList) -> (done: Int, total: Int) {
+        var done = 0, total = 0
+        for bin in bins(in: list) {
+            total += 1; if list.isPicked(bin) { done += 1 }
+            for item in chosenItems(in: list, bin: bin) { total += 1; if list.isPicked(item) { done += 1 } }
+        }
+        return (done, total)
+    }
+
+    func pickLists(containing bin: Bin) -> [PickList] { pickLists.filter { bins(in: $0).contains(bin) } }
+
+    func accessCount(_ bin: Bin, days: Int) -> Int {
         let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: .now) ?? .distantPast
         return events.filter { $0.binId == bin.id && $0.date >= cutoff }.count
     }
@@ -281,6 +361,62 @@ final class HouseholdStore {
         if let b = bin(item.binId) { logAccess(.edited, for: b) }
     }
 
+    // MARK: - Pick lists
+
+    /// Creates a pick list and returns its ID.
+    @discardableResult
+    func createPickList(name: String, binIds: [String], itemIds: [String]) -> String {
+        let ref = col("pickLists").document()
+        let list = PickList(id: ref.documentID, name: name, createdBy: userName, binIds: binIds, itemIds: itemIds)
+        ref.setData(list.data, completion: report)
+        return ref.documentID
+    }
+
+    /// Saves the name and contents. Check-offs for bins and items no longer on the list are dropped.
+    func updatePickList(_ list: PickList, name: String, binIds: [String], itemIds: [String]) {
+        var update: [String: Any] = ["name": name, "binIds": binIds, "itemIds": itemIds]
+        let removedBins = list.pickedBinIds.filter { !binIds.contains($0) }
+        let removedItems = list.pickedItemIds.filter { !itemIds.contains($0) }
+        if !removedBins.isEmpty { update["pickedBinIds"] = FieldValue.arrayRemove(removedBins) }
+        if !removedItems.isEmpty { update["pickedItemIds"] = FieldValue.arrayRemove(removedItems) }
+        col("pickLists").document(list.id).updateData(update, completion: report)
+    }
+
+    func deletePickList(_ list: PickList) {
+        col("pickLists").document(list.id).delete(completion: report)
+    }
+
+    /// Unchecks everything so the list can be used again.
+    func resetPickList(_ list: PickList) {
+        col("pickLists").document(list.id).updateData(["pickedBinIds": [String](), "pickedItemIds": [String]()], completion: report)
+    }
+
+    func add(_ bin: Bin, to list: PickList) {
+        col("pickLists").document(list.id).updateData(["binIds": FieldValue.arrayUnion([bin.id])], completion: report)
+    }
+
+    /// Adds one item (and its bin) to a list.
+    func add(_ item: Item, to list: PickList) {
+        col("pickLists").document(list.id).updateData(["binIds": FieldValue.arrayUnion([item.binId]),
+                                                       "itemIds": FieldValue.arrayUnion([item.id])],
+                                                      completion: report)
+    }
+
+    func setPicked(_ bin: Bin, in list: PickList, _ picked: Bool) {
+        HouseholdWrites.setBinPicked(listId: list.id, binId: bin.id, picked: picked, root: root, completion: report)
+        if picked && !anythingPicked(from: bin, in: list) { logAccess(.opened, for: bin) }
+    }
+
+    func setPicked(_ item: Item, in list: PickList, _ picked: Bool) {
+        HouseholdWrites.setItemPicked(listId: list.id, itemId: item.id, picked: picked, root: root, completion: report)
+        if picked, let bin = bin(item.binId), !anythingPicked(from: bin, in: list) { logAccess(.opened, for: bin) }
+    }
+
+    /// True once the bin or any of its chosen items has been checked off (so it was already opened).
+    private func anythingPicked(from bin: Bin, in list: PickList) -> Bool {
+        list.isPicked(bin) || chosenItems(in: list, bin: bin).contains(where: list.isPicked)
+    }
+
     // MARK: - Access tracking
 
     func logAccess(_ kind: AccessKind, for bin: Bin) {
@@ -289,12 +425,6 @@ final class HouseholdStore {
            Date.now.timeIntervalSince(last) < Self.viewDedupeWindow {
             return
         }
-        let now = Date.now
-        let batch = db.batch()
-        batch.setData(["binId": bin.id, "kind": kind.rawValue, "date": now, "by": userName],
-                      forDocument: col("events").document())
-        batch.updateData(["lastAccessed": now, "accessCount": FieldValue.increment(Int64(1))],
-                         forDocument: col("bins").document(bin.id))
-        batch.commit(completion: report)
+        HouseholdWrites.logAccess(kind, binId: bin.id, by: userName, root: root, completion: report)
     }
 }

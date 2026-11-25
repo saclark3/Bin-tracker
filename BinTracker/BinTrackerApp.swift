@@ -13,6 +13,9 @@ struct BinTrackerApp: App {
         } else {
             firebaseReady = false
         }
+        // Start listening for the Apple Watch early: iOS may launch the app in the
+        // background just to deliver check-offs made on the watch.
+        WatchBridge.shared.activate()
     }
 
     var body: some Scene {
@@ -57,14 +60,15 @@ struct ContentView: View {
         TabView {
             BinsView()
                 .tabItem { Label("Bins", systemImage: "shippingbox") }
+            PickListsView()
+                .tabItem { Label("Pick lists", systemImage: "checklist") }
             SearchView()
                 .tabItem { Label("Find", systemImage: "magnifyingglass") }
             AreasView()
                 .tabItem { Label("Areas", systemImage: "house") }
             CategoriesView()
                 .tabItem { Label("Categories", systemImage: "tag") }
-            HouseholdView()
-                .tabItem { Label("Household", systemImage: "person.2") }
+            // Household is opened from the Bins tab's toolbar, so iPhone keeps five tabs and no "More" tab.
         }
         .alert("Couldn't save", isPresented: Binding(get: { store.lastError != nil },
                                                      set: { if !$0 { store.clearError() } })) {

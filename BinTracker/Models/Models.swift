@@ -3,7 +3,7 @@ import SwiftUI
 import FirebaseFirestore
 
 // Plain value types mirrored from Firestore documents under
-// households/{householdId}/{areas|spots|bins|items|events|categories}.
+// households/{householdId}/{areas|spots|bins|items|events|categories|pickLists}.
 
 private func fsDate(_ value: Any?) -> Date? { (value as? Timestamp)?.dateValue() }
 
@@ -118,6 +118,50 @@ struct BinCategory: Identifiable, Hashable {
     }
 
     var data: [String: Any] { ["name": name, "colorName": colorName, "createdAt": createdAt] }
+}
+
+// MARK: - Pick list
+/// A named list of bins (and optionally specific items in them) to fetch, checked off as they're grabbed.
+/// Check-offs are stored as arrays changed with arrayUnion/arrayRemove, so two people (or a phone
+/// and a watch) can check things off at the same time without overwriting each other.
+struct PickList: Identifiable, Hashable {
+    var id: String
+    var name: String
+    var createdAt: Date
+    var createdBy: String
+    /// Bins to grab, in the order they were added.
+    var binIds: [String]
+    /// Specific items to pull. An item's bin is always on the list too.
+    var itemIds: [String]
+    var pickedBinIds: [String]
+    var pickedItemIds: [String]
+
+    init(id: String = "", name: String, createdAt: Date = .now, createdBy: String = "",
+         binIds: [String] = [], itemIds: [String] = [], pickedBinIds: [String] = [], pickedItemIds: [String] = []) {
+        self.id = id; self.name = name; self.createdAt = createdAt; self.createdBy = createdBy
+        self.binIds = binIds; self.itemIds = itemIds
+        self.pickedBinIds = pickedBinIds; self.pickedItemIds = pickedItemIds
+    }
+
+    init?(_ doc: QueryDocumentSnapshot) {
+        let d = doc.data()
+        guard let name = d["name"] as? String else { return nil }
+        self.init(id: doc.documentID, name: name,
+                  createdAt: fsDate(d["createdAt"]) ?? .now,
+                  createdBy: d["createdBy"] as? String ?? "",
+                  binIds: d["binIds"] as? [String] ?? [],
+                  itemIds: d["itemIds"] as? [String] ?? [],
+                  pickedBinIds: d["pickedBinIds"] as? [String] ?? [],
+                  pickedItemIds: d["pickedItemIds"] as? [String] ?? [])
+    }
+
+    var data: [String: Any] {
+        ["name": name, "createdAt": createdAt, "createdBy": createdBy,
+         "binIds": binIds, "itemIds": itemIds, "pickedBinIds": pickedBinIds, "pickedItemIds": pickedItemIds]
+    }
+
+    func isPicked(_ bin: Bin) -> Bool { pickedBinIds.contains(bin.id) }
+    func isPicked(_ item: Item) -> Bool { pickedItemIds.contains(item.id) }
 }
 
 // MARK: - Item
@@ -265,3 +309,6 @@ extension Date {
 
 /// Navigation value for opening a bin by its document ID.
 struct BinRef: Hashable { let id: String }
+
+/// Navigation value for opening a pick list.
+struct PickListRef: Hashable { let id: String }
