@@ -18,13 +18,13 @@ jobs:
     env:
       ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_TEAM_ID: SLTV9MC3Y7   # not secret; matches DEVELOPMENT_TEAM in project.yml
       ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
     steps:
       - name: Check Apple secrets are set
         run: |
           missing=""
-          for v in ASC_KEY_ID ASC_ISSUER_ID APPLE_TEAM_ID ASC_KEY_P8; do
+          for v in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8; do
             if [ -z "${!v}" ]; then missing="$missing $v"; fi
           done
           if [ -n "$missing" ]; then

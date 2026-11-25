@@ -74,12 +74,12 @@ One-time setup:
 3. **Create an API key**: App Store Connect › Users and Access › Integrations › App Store Connect API ›
    Team Keys › **+**. Name `GitHub`, access **Admin**. Download the `.p8` file (only possible once) and note the
    **Key ID** and the **Issuer ID** shown above the list.
-4. **Find your Team ID**: developer.apple.com/account › Membership details.
-5. **Add four repository secrets** on GitHub: repo › Settings › Secrets and variables › Actions › New repository secret.
+4. **Add three repository secrets** on GitHub: repo › Settings › Secrets and variables › Actions › New repository secret.
    - `ASC_KEY_ID`: the Key ID
    - `ASC_ISSUER_ID`: the Issuer ID
    - `ASC_KEY_P8`: the full text of the `.p8` file, including the BEGIN and END lines
-   - `APPLE_TEAM_ID`: the Team ID
+
+The Apple Team ID (`SLTV9MC3Y7`) is set in `project.yml`; it isn't secret.
 
 Adding testers: in App Store Connect › TestFlight, create an internal group and add yourself.
 To add someone else (they install with their own Apple ID), invite them first under Users and Access,
