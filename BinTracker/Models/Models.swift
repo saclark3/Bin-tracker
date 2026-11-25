@@ -3,7 +3,7 @@ import SwiftUI
 import FirebaseFirestore
 
 // Plain value types mirrored from Firestore documents under
-// households/{householdId}/{areas|spots|bins|items|events}.
+// households/{householdId}/{areas|spots|bins|items|events|categories}.
 
 private func fsDate(_ value: Any?) -> Date? { (value as? Timestamp)?.dateValue() }
 
@@ -59,15 +59,18 @@ struct Bin: Identifiable, Hashable {
     var notes: String
     var colorName: String
     var spotId: String?
+    /// Categories this bin belongs to (a bin can be in several).
+    var categoryIds: [String]
     var createdAt: Date
     var lastAccessed: Date?
     var accessCount: Int
 
     init(id: String, code: String, name: String = "", notes: String = "", colorName: String = "blue",
-         spotId: String? = nil, createdAt: Date = .now, lastAccessed: Date? = nil, accessCount: Int = 0) {
+         spotId: String? = nil, categoryIds: [String] = [], createdAt: Date = .now,
+         lastAccessed: Date? = nil, accessCount: Int = 0) {
         self.id = id; self.code = code; self.name = name; self.notes = notes
-        self.colorName = colorName; self.spotId = spotId; self.createdAt = createdAt
-        self.lastAccessed = lastAccessed; self.accessCount = accessCount
+        self.colorName = colorName; self.spotId = spotId; self.categoryIds = categoryIds
+        self.createdAt = createdAt; self.lastAccessed = lastAccessed; self.accessCount = accessCount
     }
 
     init?(_ doc: QueryDocumentSnapshot) {
@@ -78,6 +81,7 @@ struct Bin: Identifiable, Hashable {
                   notes: d["notes"] as? String ?? "",
                   colorName: d["colorName"] as? String ?? "blue",
                   spotId: d["spotId"] as? String,
+                  categoryIds: d["categoryIds"] as? [String] ?? [],
                   createdAt: fsDate(d["createdAt"]) ?? .now,
                   lastAccessed: fsDate(d["lastAccessed"]),
                   accessCount: d["accessCount"] as? Int ?? 0)
@@ -86,10 +90,34 @@ struct Bin: Identifiable, Hashable {
     /// Fields the editor owns. Access stats are updated separately so edits never reset them.
     var editableData: [String: Any] {
         ["code": code, "name": name, "notes": notes, "colorName": colorName,
-         "spotId": spotId.map { $0 as Any } ?? NSNull(), "createdAt": createdAt]
+         "spotId": spotId.map { $0 as Any } ?? NSNull(), "categoryIds": categoryIds,
+         "createdAt": createdAt]
     }
 
     var displayName: String { name.isEmpty ? "Untitled bin" : name }
+}
+
+// MARK: - Category
+/// A household-wide label such as "Holiday" or "Camping". Bins can have any number of them.
+struct BinCategory: Identifiable, Hashable {
+    var id: String
+    var name: String
+    var colorName: String
+    var createdAt: Date
+
+    init(id: String, name: String, colorName: String = "blue", createdAt: Date = .now) {
+        self.id = id; self.name = name; self.colorName = colorName; self.createdAt = createdAt
+    }
+
+    init?(_ doc: QueryDocumentSnapshot) {
+        let d = doc.data()
+        guard let name = d["name"] as? String else { return nil }
+        self.init(id: doc.documentID, name: name,
+                  colorName: d["colorName"] as? String ?? "blue",
+                  createdAt: fsDate(d["createdAt"]) ?? .now)
+    }
+
+    var data: [String: Any] { ["name": name, "colorName": colorName, "createdAt": createdAt] }
 }
 
 // MARK: - Item

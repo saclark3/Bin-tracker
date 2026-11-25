@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// "Where did I put the…?" Searches item names and notes, plus bin IDs and names.
+/// "Where did I put the…?" Searches item names and notes, plus bin IDs, names and categories.
 struct SearchView: View {
     @Environment(HouseholdStore.self) private var store
     @State private var query = ""
@@ -18,9 +18,11 @@ struct SearchView: View {
         guard !trimmed.isEmpty else { return [] }
         let key = BinCode.lookupKey(trimmed)
         let prefix = BinCode.normalize(trimmed)
+        let categoryIds = Set(store.categories.filter { $0.name.localizedCaseInsensitiveContains(trimmed) }.map(\.id))
         return store.bins.filter {
             let code = BinCode.normalize($0.code)
             return code == key || code.hasPrefix(prefix) || $0.name.localizedCaseInsensitiveContains(trimmed)
+                || !categoryIds.isDisjoint(with: $0.categoryIds)
         }
         .sorted { $0.code.localizedStandardCompare($1.code) == .orderedAscending }
     }
@@ -56,7 +58,7 @@ struct SearchView: View {
             }
             .navigationTitle("Find")
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
-                        prompt: "Item, bin ID or bin name")
+                        prompt: "Item, bin ID, name or category")
             .navigationDestination(for: BinRef.self) { BinDetailView(binId: $0.id) }
         }
     }

@@ -28,6 +28,10 @@ struct BinDetailView: View {
                     if !bin.name.isEmpty { Text(bin.name).font(.title3.bold()) }
                     Label(store.locationPath(of: bin), systemImage: "mappin.and.ellipse")
                         .foregroundStyle(.secondary)
+                    let cats = store.categories(of: bin)
+                    if !cats.isEmpty {
+                        FlowLayout(alignment: .center) { ForEach(cats) { CategoryChip(category: $0) } }
+                    }
                     if !bin.notes.isEmpty {
                         Text(bin.notes).font(.footnote).foregroundStyle(.secondary).multilineTextAlignment(.center)
                     }

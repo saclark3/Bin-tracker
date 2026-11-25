@@ -61,6 +61,8 @@ struct ContentView: View {
                 .tabItem { Label("Find", systemImage: "magnifyingglass") }
             AreasView()
                 .tabItem { Label("Areas", systemImage: "house") }
+            CategoriesView()
+                .tabItem { Label("Categories", systemImage: "tag") }
             HouseholdView()
                 .tabItem { Label("Household", systemImage: "person.2") }
         }

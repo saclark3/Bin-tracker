@@ -16,6 +16,9 @@ when the device is back online.
 - **Items**: add, rename, set quantity and notes, move to another bin, or remove.
 - **Find tab**: search for "extension cord" and see which bin it's in and where (e.g. *Garage › Shelf 2*).
 - **Areas tab**: areas of the home → spots within them → bins at each spot.
+- **Categories tab**: household-wide categories (e.g. *Holiday*, *Camping*). A bin can be in several.
+  Pick them in the bin editor (or create a new one there), tick bins from a category's screen,
+  and filter the Bins tab by category with the filter button. Find also matches category names.
 
 ## Bin IDs
 
