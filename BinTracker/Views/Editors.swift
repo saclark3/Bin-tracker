@@ -14,6 +14,7 @@ struct BinEditorView: View {
     @State private var notes = ""
     @State private var colorName = BinColor.blue.rawValue
     @State private var spotId: String?
+    @State private var categoryIds: [String] = []
     @State private var loaded = false
 
     init(bin: Bin?, presetSpotId: String? = nil, onCreate: ((String) -> Void)? = nil) {
@@ -64,6 +65,26 @@ struct BinEditorView: View {
                 }
 
                 Section {
+                    NavigationLink {
+                        CategoryPickerView(selection: $categoryIds)
+                    } label: {
+                        let chosen = store.categories.filter { categoryIds.contains($0.id) }
+                        if chosen.isEmpty {
+                            LabeledContent("Categories", value: "None")
+                        } else {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Categories")
+                                FlowLayout { ForEach(chosen) { CategoryChip(category: $0) } }
+                            }
+                        }
+                    }
+                } header: {
+                    Text("Categories")
+                } footer: {
+                    Text("Pick as many as fit, or create new ones.")
+                }
+
+                Section {
                     Picker("Location", selection: $spotId) {
                         Text("Not set").tag(String?.none)
                         ForEach(store.areas) { area in
@@ -96,7 +117,7 @@ struct BinEditorView: View {
         guard !loaded else { return }
         if let bin {
             code = bin.code; name = bin.name; notes = bin.notes
-            colorName = bin.colorName; spotId = bin.spotId
+            colorName = bin.colorName; spotId = bin.spotId; categoryIds = bin.categoryIds
         } else {
             code = store.nextCode
             spotId = presetSpotId
@@ -109,10 +130,12 @@ struct BinEditorView: View {
         if var existing = bin {
             existing.code = c; existing.name = name; existing.notes = notes
             existing.colorName = colorName; existing.spotId = spotId
+            existing.categoryIds = categoryIds
             store.updateBin(existing)
         } else {
             let newId = store.createBin(Bin(id: "", code: c, name: name, notes: notes,
-                                            colorName: colorName, spotId: spotId))
+                                            colorName: colorName, spotId: spotId,
+                                            categoryIds: categoryIds))
             onCreate?(newId)
         }
         dismiss()

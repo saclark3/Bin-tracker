@@ -15,6 +15,8 @@ struct BinsView: View {
     @State private var jumpCode = ""
     @State private var jumpError: String?
     @State private var showingNewBin = false
+    /// Show only bins in this category (nil = all bins).
+    @State private var filterCategoryId: String?
     @FocusState private var jumpFocused: Bool
 
     var body: some View {
@@ -45,6 +47,8 @@ struct BinsView: View {
                         ContentUnavailableView("No bins yet",
                                                systemImage: "shippingbox",
                                                description: Text("Tap + to add your first bin. Write its ID on the box."))
+                    } else if let filter = activeFilter, sortedBins.isEmpty {
+                        Text("No bins in \(filter.name) yet.").foregroundStyle(.secondary)
                     }
                     ForEach(sortedBins) { bin in
                         NavigationLink(value: BinRef(id: bin.id)) { BinRow(bin: bin) }
@@ -54,10 +58,18 @@ struct BinsView: View {
                         offsets.forEach { store.deleteBin(list[$0]) }
                     }
                 } header: {
-                    Picker("Sort", selection: $sort) {
-                        ForEach(BinSort.allCases) { Text($0.rawValue).tag($0) }
+                    VStack(alignment: .leading, spacing: 8) {
+                        Picker("Sort", selection: $sort) {
+                            ForEach(BinSort.allCases) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        if let filter = activeFilter {
+                            Button { filterCategoryId = nil } label: {
+                                Label("Showing \(filter.name) only", systemImage: "xmark.circle.fill")
+                                    .font(.subheadline)
+                            }
+                        }
                     }
-                    .pickerStyle(.segmented)
                     .textCase(nil)
                     .padding(.bottom, 4)
                 }
@@ -65,6 +77,23 @@ struct BinsView: View {
             .navigationTitle("Bins")
             .navigationDestination(for: BinRef.self) { BinDetailView(binId: $0.id) }
             .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Menu {
+                        Picker("Category", selection: $filterCategoryId) {
+                            Text("All bins").tag(String?.none)
+                            ForEach(store.categories) { c in
+                                Text("\(c.name) (\(store.bins(in: c).count))").tag(String?.some(c.id))
+                            }
+                        }
+                        if store.categories.isEmpty {
+                            Text("Create categories in the Categories tab")
+                        }
+                    } label: {
+                        Label("Filter by category",
+                              systemImage: activeFilter == nil ? "line.3.horizontal.decrease.circle"
+                                                               : "line.3.horizontal.decrease.circle.fill")
+                    }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button { showingNewBin = true } label: { Label("New bin", systemImage: "plus") }
                 }
@@ -76,14 +105,17 @@ struct BinsView: View {
         }
     }
 
+    private var activeFilter: BinCategory? { store.category(filterCategoryId) }
+
     private var sortedBins: [Bin] {
+        let shown = activeFilter.map { c in store.bins.filter { $0.categoryIds.contains(c.id) } } ?? store.bins
         switch sort {
         case .recent:
-            store.bins.sorted { ($0.lastAccessed ?? $0.createdAt) > ($1.lastAccessed ?? $1.createdAt) }
+            return shown.sorted { ($0.lastAccessed ?? $0.createdAt) > ($1.lastAccessed ?? $1.createdAt) }
         case .frequent:
-            store.bins.sorted { store.accessCount($0, days: 30) > store.accessCount($1, days: 30) }
+            return shown.sorted { store.accessCount($0, days: 30) > store.accessCount($1, days: 30) }
         case .code:
-            store.bins.sorted { $0.code.localizedStandardCompare($1.code) == .orderedAscending }
+            return shown.sorted { $0.code.localizedStandardCompare($1.code) == .orderedAscending }
         }
     }
 
@@ -109,6 +141,10 @@ struct BinRow: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(bin.displayName).font(.headline)
                 Text(store.locationPath(of: bin)).font(.subheadline).foregroundStyle(.secondary)
+                let cats = store.categories(of: bin)
+                if !cats.isEmpty {
+                    FlowLayout(spacing: 4) { ForEach(cats) { CategoryChip(category: $0) } }
+                }
                 HStack(spacing: 10) {
                     Label("\(store.items(in: bin).count)", systemImage: "list.bullet")
                     Label("\(store.accessCount(bin, days: 30))× in 30d", systemImage: "clock.arrow.circlepath")

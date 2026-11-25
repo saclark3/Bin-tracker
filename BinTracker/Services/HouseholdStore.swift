@@ -19,6 +19,7 @@ final class HouseholdStore {
     private(set) var spots: [Spot] = []
     private(set) var bins: [Bin] = []
     private(set) var items: [Item] = []
+    private(set) var categories: [BinCategory] = []
     private(set) var events: [AccessEvent] = []
     private(set) var lastError: String?
 
@@ -64,6 +65,9 @@ final class HouseholdStore {
         listen("bins") { [weak self] docs in self?.bins = docs.compactMap(Bin.init) }
         listen("items") { [weak self] docs in
             self?.items = docs.compactMap(Item.init).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }
+        listen("categories") { [weak self] docs in
+            self?.categories = docs.compactMap(BinCategory.init).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
         }
         let cutoff = Calendar.current.date(byAdding: .day, value: -Self.historyDays, to: .now) ?? .distantPast
         listen("events", query: col("events").whereField("date", isGreaterThan: cutoff)) { [weak self] docs in
@@ -111,10 +115,28 @@ final class HouseholdStore {
     }
     var unplacedBins: [Bin] { bins.filter { spot($0.spotId) == nil } }
 
+    func category(_ id: String?) -> BinCategory? { categories.first { $0.id == id } }
+    /// The bin's categories in alphabetical order (ids of deleted categories are skipped).
+    func categories(of bin: Bin) -> [BinCategory] {
+        let ids = Set(bin.categoryIds)
+        return categories.filter { ids.contains($0.id) }
+    }
+    func bins(in category: BinCategory) -> [Bin] {
+        bins.filter { $0.categoryIds.contains(category.id) }
+            .sorted { $0.code.localizedStandardCompare($1.code) == .orderedAscending }
+    }
+    func categoryNameTaken(_ name: String, excluding id: String? = nil) -> Bool {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return categories.contains { $0.id != id && $0.name.compare(n, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }
+    }
+
     func items(in bin: Bin) -> [Item] { items.filter { $0.binId == bin.id } }
     func events(for bin: Bin) -> [AccessEvent] { events.filter { $0.binId == bin.id } }
 
     func accessCount(_ bin: Bin, days: Int) -> Int {
+        listen("categories") { [weak self] docs in
+            self?.categories = docs.compactMap(BinCategory.init).sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        }
         let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: .now) ?? .distantPast
         return events.filter { $0.binId == bin.id && $0.date >= cutoff }.count
     }
@@ -174,6 +196,45 @@ final class HouseholdStore {
         for bin in bins where bin.spotId == spot.id {
             batch.updateData(["spotId": NSNull()], forDocument: col("bins").document(bin.id))
         }
+    }
+
+    // MARK: - Categories
+
+    /// Creates a category and returns its ID (usable right away, even offline).
+    /// If one with the same name exists, returns that one instead.
+    @discardableResult
+    func addCategory(_ name: String) -> String {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let existing = categories.first(where: { $0.name.compare(n, options: [.caseInsensitive, .diacriticInsensitive]) == .orderedSame }) {
+            return existing.id
+        }
+        let colours = BinColor.allCases
+        let colour = colours[categories.count % colours.count].rawValue
+        let ref = col("categories").document()
+        ref.setData(BinCategory(id: ref.documentID, name: n, colorName: colour).data, completion: report)
+        return ref.documentID
+    }
+
+    func updateCategory(_ category: BinCategory) {
+        col("categories").document(category.id)
+            .updateData(["name": category.name, "colorName": category.colorName], completion: report)
+    }
+
+    /// Deletes the category and takes it off every bin. The bins themselves are kept.
+    func deleteCategory(_ category: BinCategory) {
+        let batch = db.batch()
+        for bin in bins where bin.categoryIds.contains(category.id) {
+            batch.updateData(["categoryIds": FieldValue.arrayRemove([category.id])],
+                             forDocument: col("bins").document(bin.id))
+        }
+        batch.deleteDocument(col("categories").document(category.id))
+        batch.commit(completion: report)
+    }
+
+    /// Adds or removes one bin from a category without touching its other fields.
+    func setBin(_ bin: Bin, in category: BinCategory, _ included: Bool) {
+        let value: FieldValue = included ? FieldValue.arrayUnion([category.id]) : FieldValue.arrayRemove([category.id])
+        col("bins").document(bin.id).updateData(["categoryIds": value], completion: report)
     }
 
     // MARK: - Bins
