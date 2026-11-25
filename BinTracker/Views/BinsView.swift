@@ -15,6 +15,7 @@ struct BinsView: View {
     @State private var jumpCode = ""
     @State private var jumpError: String?
     @State private var showingNewBin = false
+    @State private var showingHousehold = false
     /// Show only bins in this category (nil = all bins).
     @State private var filterCategoryId: String?
     @FocusState private var jumpFocused: Bool
@@ -94,10 +95,14 @@ struct BinsView: View {
                                                                : "line.3.horizontal.decrease.circle.fill")
                     }
                 }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button { showingHousehold = true } label: { Label("Household", systemImage: "person.2") }
+                }
                 ToolbarItem(placement: .primaryAction) {
                     Button { showingNewBin = true } label: { Label("New bin", systemImage: "plus") }
                 }
             }
+            .sheet(isPresented: $showingHousehold) { HouseholdView(showsDone: true) }
             .sheet(isPresented: $showingNewBin) {
                 BinEditorView(bin: nil) { newId in path.append(BinRef(id: newId)) }
             }

@@ -9,6 +9,7 @@ struct BinDetailView: View {
     @State private var showingEditBin = false
     @State private var showingHistory = false
     @State private var loggedView = false
+    @State private var showingNewPickList = false
     @FocusState private var quickFocused: Bool
 
     var body: some View {
@@ -53,6 +54,11 @@ struct BinDetailView: View {
                 ForEach(items) { item in
                     Button { editingItem = item } label: { ItemRow(item: item) }
                         .tint(.primary)
+                        .contextMenu {
+                            AddToPickListMenu(bin: bin, item: item, onNewList: { showingNewPickList = true }) {
+                                Label("Add to pick list", systemImage: "checklist")
+                            }
+                        }
                 }
                 .onDelete { offsets in offsets.forEach { store.deleteItem(items[$0]) } }
             }
@@ -72,7 +78,15 @@ struct BinDetailView: View {
         }
         .navigationTitle(bin.code)
         .navigationBarTitleDisplayMode(.inline)
-        .toolbar { Button("Edit") { showingEditBin = true } }
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                AddToPickListMenu(bin: bin, onNewList: { showingNewPickList = true }) {
+                    Label("Add to pick list", systemImage: "checklist")
+                }
+                Button("Edit") { showingEditBin = true }
+            }
+        }
+        .sheet(isPresented: $showingNewPickList) { PickListEditorView(list: nil, startingBinIds: [bin.id]) }
         .onAppear {
             guard !loggedView else { return }
             loggedView = true

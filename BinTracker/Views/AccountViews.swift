@@ -168,10 +168,12 @@ struct HouseholdSetupView: View {
     }
 }
 
-// MARK: - Household tab
+// MARK: - Household (opened from the Bins tab)
 struct HouseholdView: View {
     @Environment(AppSession.self) private var session
     @Environment(HouseholdStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    var showsDone = false
     @State private var confirmingLeave = false
 
     var body: some View {
@@ -204,6 +206,9 @@ struct HouseholdView: View {
                 }
             }
             .navigationTitle("Household")
+            .toolbar {
+                if showsDone { Button("Done") { dismiss() } }
+            }
             .confirmationDialog("Leave \(store.householdName)?", isPresented: $confirmingLeave, titleVisibility: .visible) {
                 Button("Leave household", role: .destructive) {
                     Task { try? await session.leaveHousehold() }

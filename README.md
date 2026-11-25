@@ -1,4 +1,4 @@
-# Bins: storage bin tracker (v0.2)
+# Bins: storage bin tracker (v0.3)
 
 An iPhone and iPad app (SwiftUI, iOS 17+) for tracking what's in each storage bin,
 where each bin lives in the house, and how often it's used. Everyone in the household
@@ -8,7 +8,7 @@ when the device is back online.
 ## What it does
 
 - **Household**: each person signs in with email and password. One person creates the household,
-  and the others join with its 6-character invite code (shown in the Household tab, with a Send invite button).
+  and the others join with its 6-character invite code (open it with the people button at the top of the Bins tab, which has a Send invite button).
 - **Bins tab**: every bin, sortable by *Recently used*, *Most used* (last 30 days) or *Bin ID*.
   A "Go to bin" box at the top: type the ID written on the box (`B12`, `b12`, or just `12`).
 - **Bin screen**: large ID badge, location, contents with quick add, usage stats (last accessed,
@@ -19,6 +19,27 @@ when the device is back online.
 - **Categories tab**: household-wide categories (e.g. *Holiday*, *Camping*). A bin can be in several.
   Pick them in the bin editor (or create a new one there), tick bins from a category's screen,
   and filter the Bins tab by category with the filter button. Find also matches category names.
+- **Pick lists tab**: make a named list of bins to fetch (search, or add a whole category at once). For any bin you
+  can tick just the items to pull instead of the whole bin. Then check bins off as you grab them and items as you
+  pull them. Lists are grouped by area, so they read in the order you'd walk the house. Checking something off
+  counts as opening that bin. Add a bin or item to a list from its screen too (the checklist button, or press and
+  hold an item). Several people can check off the same list at once.
+- **Apple Watch app**: shows your pick lists to check off, recent bins, and a bin search with quick add
+  (dictate an item into a bin). See *Apple Watch* below.
+
+## Apple Watch
+
+The watch app is installed from the iPhone: once the TestFlight build is on the phone, open the **Watch** app on
+the iPhone, scroll to *Available Apps*, and tap **Install** next to Bins.
+
+The watch keeps its own copy of your bins and pick lists, sent from the iPhone whenever something changes, so it
+works upstairs even when the phone stays downstairs or is switched off. Check-offs and quick adds made on the
+watch show straight away on the watch and wait in a queue until the watch and phone can talk again (Bluetooth
+range, or both on the same Wi-Fi); then the phone saves them and they reach everyone else. The bottom of the
+watch's home screen shows when it last updated and how many changes are still waiting.
+
+Firebase doesn't support Apple Watch apps, so the watch never talks to Firebase itself; everything goes
+through the iPhone app.
 
 ## Bin IDs
 
@@ -83,6 +104,10 @@ One-time setup:
    - `ASC_KEY_P8`: the full text of the `.p8` file, including the BEGIN and END lines
 
 The Apple Team ID (`SLTV9MC3Y7`) is set in `project.yml`; it isn't secret.
+
+The watch app has its own bundle ID, `com.saclark3.bintracker.watchkitapp`. Xcode registers it automatically
+during the TestFlight build (the API key has Admin access). If a build fails with a signing or profile error for
+that ID, register it by hand the same way as step 1 (description `Bins Watch`).
 
 Adding testers: in App Store Connect › TestFlight, create an internal group and add yourself.
 To add someone else (they install with their own Apple ID), invite them first under Users and Access,
