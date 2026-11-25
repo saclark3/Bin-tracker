@@ -59,3 +59,28 @@ open BinTracker.xcodeproj
 - Starter areas offered on first launch: Garage, Basement, Attic, Hall closet, Bedroom closet.
 - Email and password sign-in (Sign in with Apple could be added later).
 - iPhone portrait; iPad any orientation.
+
+## TestFlight (installing on phones and iPads)
+
+Every push to `main` builds the app on GitHub and uploads it to TestFlight
+(`.github/workflows/testflight.yml`). You can also run it by hand from the Actions tab.
+
+One-time setup:
+1. **Register the bundle ID**: [developer.apple.com/account](https://developer.apple.com/account) ›
+   Certificates, Identifiers & Profiles › Identifiers › **+** › App IDs › App.
+   Description `Bins`, Explicit Bundle ID `com.saclark3.bintracker`.
+2. **Create the app record**: [appstoreconnect.apple.com](https://appstoreconnect.apple.com) › Apps › **+** › New App.
+   Platform iOS, any unique name (e.g. "Bins Home Storage"), the bundle ID above, SKU `bins`.
+3. **Create an API key**: App Store Connect › Users and Access › Integrations › App Store Connect API ›
+   Team Keys › **+**. Name `GitHub`, access **Admin**. Download the `.p8` file (only possible once) and note the
+   **Key ID** and the **Issuer ID** shown above the list.
+4. **Find your Team ID**: developer.apple.com/account › Membership details.
+5. **Add four repository secrets** on GitHub: repo › Settings › Secrets and variables › Actions › New repository secret.
+   - `ASC_KEY_ID`: the Key ID
+   - `ASC_ISSUER_ID`: the Issuer ID
+   - `ASC_KEY_P8`: the full text of the `.p8` file, including the BEGIN and END lines
+   - `APPLE_TEAM_ID`: the Team ID
+
+Adding testers: in App Store Connect › TestFlight, create an internal group and add yourself.
+To add someone else (they install with their own Apple ID), invite them first under Users and Access,
+then add them to the group. They'll get an email to install TestFlight and the app.
