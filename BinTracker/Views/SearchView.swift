@@ -1,17 +1,15 @@
 import SwiftUI
-import SwiftData
 
 /// "Where did I put the…?" Searches item names and notes, plus bin IDs and names.
 struct SearchView: View {
-    @Query(sort: \Item.name) private var items: [Item]
-    @Query(sort: \Bin.code) private var bins: [Bin]
+    @Environment(HouseholdStore.self) private var store
     @State private var query = ""
 
     private var trimmed: String { query.trimmingCharacters(in: .whitespacesAndNewlines) }
 
     private var matchingItems: [Item] {
         guard !trimmed.isEmpty else { return [] }
-        return items.filter {
+        return store.items.filter {
             $0.name.localizedCaseInsensitiveContains(trimmed) || $0.notes.localizedCaseInsensitiveContains(trimmed)
         }
     }
@@ -19,11 +17,12 @@ struct SearchView: View {
     private var matchingBins: [Bin] {
         guard !trimmed.isEmpty else { return [] }
         let key = BinCode.lookupKey(trimmed)
-        return bins.filter {
-            BinCode.normalize($0.code) == key
-                || BinCode.normalize($0.code).hasPrefix(BinCode.normalize(trimmed))
-                || $0.name.localizedCaseInsensitiveContains(trimmed)
+        let prefix = BinCode.normalize(trimmed)
+        return store.bins.filter {
+            let code = BinCode.normalize($0.code)
+            return code == key || code.hasPrefix(prefix) || $0.name.localizedCaseInsensitiveContains(trimmed)
         }
+        .sorted { $0.code.localizedStandardCompare($1.code) == .orderedAscending }
     }
 
     var body: some View {
@@ -40,7 +39,7 @@ struct SearchView: View {
                 if !matchingBins.isEmpty {
                     Section("Bins") {
                         ForEach(matchingBins) { bin in
-                            NavigationLink(value: bin) { BinRow(bin: bin) }
+                            NavigationLink(value: BinRef(id: bin.id)) { BinRow(bin: bin) }
                         }
                     }
                 }
@@ -48,8 +47,8 @@ struct SearchView: View {
                 if !matchingItems.isEmpty {
                     Section("Items") {
                         ForEach(matchingItems) { item in
-                            if let bin = item.bin {
-                                NavigationLink(value: bin) { SearchResultRow(item: item, bin: bin) }
+                            if let bin = store.bin(item.binId) {
+                                NavigationLink(value: BinRef(id: bin.id)) { SearchResultRow(item: item, bin: bin) }
                             }
                         }
                     }
@@ -58,12 +57,13 @@ struct SearchView: View {
             .navigationTitle("Find")
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always),
                         prompt: "Item, bin ID or bin name")
-            .navigationDestination(for: Bin.self) { BinDetailView(bin: $0) }
+            .navigationDestination(for: BinRef.self) { BinDetailView(binId: $0.id) }
         }
     }
 }
 
 struct SearchResultRow: View {
+    @Environment(HouseholdStore.self) private var store
     let item: Item
     let bin: Bin
 
@@ -75,7 +75,7 @@ struct SearchResultRow: View {
                     Text(item.name).font(.headline)
                     if item.quantity != 1 { Text("×\(item.quantity)").foregroundStyle(.secondary) }
                 }
-                Label(bin.locationPath, systemImage: "mappin.and.ellipse")
+                Label(store.locationPath(of: bin), systemImage: "mappin.and.ellipse")
                     .font(.subheadline).foregroundStyle(.secondary)
             }
         }

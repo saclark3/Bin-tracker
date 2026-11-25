@@ -1,21 +1,16 @@
 import SwiftUI
-import SwiftData
 
 /// Areas (rooms) → spots within them → bins at each spot.
 struct AreasView: View {
-    @Environment(\.modelContext) private var context
-    @Query(sort: \Area.name) private var areas: [Area]
-    @Query private var allBins: [Bin]
+    @Environment(HouseholdStore.self) private var store
 
     @State private var showingNewArea = false
     @State private var newAreaName = ""
 
-    private var unplacedBins: [Bin] { allBins.filter { $0.location == nil } }
-
     var body: some View {
         NavigationStack {
             List {
-                if areas.isEmpty {
+                if store.areas.isEmpty {
                     ContentUnavailableView {
                         Label("No areas yet", systemImage: "house")
                     } description: {
@@ -25,31 +20,35 @@ struct AreasView: View {
                             .buttonStyle(.borderedProminent)
                     }
                 }
-                ForEach(areas) { area in
+                ForEach(store.areas) { area in
                     NavigationLink(value: area) {
                         Label {
                             VStack(alignment: .leading) {
                                 Text(area.name)
-                                Text("\(area.locations.count) spots · \(area.binCount) bins")
+                                Text("\(store.spots(in: area).count) spots · \(store.binCount(in: area)) bins")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
                         } icon: { Image(systemName: area.symbol) }
                     }
                 }
-                .onDelete { offsets in offsets.forEach { context.delete(areas[$0]) } }
+                .onDelete { offsets in
+                    let list = store.areas
+                    offsets.forEach { store.deleteArea(list[$0]) }
+                }
 
-                if !unplacedBins.isEmpty {
+                let unplaced = store.unplacedBins
+                if !unplaced.isEmpty {
                     Section("Bins with no location") {
-                        ForEach(unplacedBins) { bin in
-                            NavigationLink(value: bin) { BinRow(bin: bin) }
+                        ForEach(unplaced) { bin in
+                            NavigationLink(value: BinRef(id: bin.id)) { BinRow(bin: bin) }
                         }
                     }
                 }
             }
             .navigationTitle("Areas")
-            .navigationDestination(for: Area.self) { AreaDetailView(area: $0) }
-            .navigationDestination(for: StorageLocation.self) { LocationDetailView(location: $0) }
-            .navigationDestination(for: Bin.self) { BinDetailView(bin: $0) }
+            .navigationDestination(for: Area.self) { AreaDetailView(areaId: $0.id) }
+            .navigationDestination(for: Spot.self) { SpotDetailView(spotId: $0.id) }
+            .navigationDestination(for: BinRef.self) { BinDetailView(binId: $0.id) }
             .toolbar {
                 Button { showingNewArea = true } label: { Label("New area", systemImage: "plus") }
             }
@@ -57,7 +56,7 @@ struct AreasView: View {
                 TextField("e.g. Garage", text: $newAreaName)
                 Button("Add") {
                     let name = newAreaName.trimmingCharacters(in: .whitespaces)
-                    if !name.isEmpty { context.insert(Area(name: name, symbol: AreaSymbol.guess(for: name))) }
+                    if !name.isEmpty { store.addArea(name) }
                     newAreaName = ""
                 }
                 Button("Cancel", role: .cancel) { newAreaName = "" }
@@ -68,39 +67,46 @@ struct AreasView: View {
     /// GUESS: a starter set to save typing on first launch. Easy to rename or delete.
     private func addStarterAreas() {
         for name in ["Garage", "Basement", "Attic", "Hall closet", "Bedroom closet"] {
-            context.insert(Area(name: name, symbol: AreaSymbol.guess(for: name)))
+            store.addArea(name)
         }
     }
 }
 
 struct AreaDetailView: View {
-    @Environment(\.modelContext) private var context
-    @Bindable var area: Area
-    @State private var showingNewLocation = false
-    @State private var newLocationName = ""
+    @Environment(HouseholdStore.self) private var store
+    let areaId: String
+
+    @State private var showingNewSpot = false
+    @State private var newSpotName = ""
     @State private var renaming = false
     @State private var renameText = ""
 
     var body: some View {
-        List {
+        if let area = store.area(areaId) {
+            content(area)
+        } else {
+            ContentUnavailableView("Area not found", systemImage: "house")
+        }
+    }
+
+    private func content(_ area: Area) -> some View {
+        let spots = store.spots(in: area)
+        return List {
             Section {
-                if area.locations.isEmpty {
+                if spots.isEmpty {
                     Text("Add spots in \(area.name), like \"Shelf 1\" or \"Under the stairs\".")
                         .foregroundStyle(.secondary)
                 }
-                ForEach(area.sortedLocations) { loc in
-                    NavigationLink(value: loc) {
+                ForEach(spots) { spot in
+                    NavigationLink(value: spot) {
                         HStack {
-                            Text(loc.name)
+                            Text(spot.name)
                             Spacer()
-                            Text("\(loc.bins.count) bins").foregroundStyle(.secondary)
+                            Text("\(store.bins(at: spot).count) bins").foregroundStyle(.secondary)
                         }
                     }
                 }
-                .onDelete { offsets in
-                    let list = area.sortedLocations
-                    offsets.forEach { context.delete(list[$0]) }
-                }
+                .onDelete { offsets in offsets.forEach { store.deleteSpot(spots[$0]) } }
             } header: {
                 Text("Spots")
             } footer: {
@@ -110,73 +116,55 @@ struct AreaDetailView: View {
         .navigationTitle(area.name)
         .toolbar {
             Menu {
-                Button("Add spot", systemImage: "plus") { showingNewLocation = true }
+                Button("Add spot", systemImage: "plus") { showingNewSpot = true }
                 Button("Rename area", systemImage: "pencil") { renameText = area.name; renaming = true }
             } label: { Image(systemName: "ellipsis.circle") }
         }
-        .alert("New spot in \(area.name)", isPresented: $showingNewLocation) {
-            TextField("e.g. Shelf 2", text: $newLocationName)
+        .alert("New spot in \(area.name)", isPresented: $showingNewSpot) {
+            TextField("e.g. Shelf 2", text: $newSpotName)
             Button("Add") {
-                let name = newLocationName.trimmingCharacters(in: .whitespaces)
-                if !name.isEmpty {
-                    let loc = StorageLocation(name: name)
-                    context.insert(loc)
-                    area.locations.append(loc)
-                }
-                newLocationName = ""
+                let name = newSpotName.trimmingCharacters(in: .whitespaces)
+                if !name.isEmpty { store.addSpot(name, in: area) }
+                newSpotName = ""
             }
-            Button("Cancel", role: .cancel) { newLocationName = "" }
+            Button("Cancel", role: .cancel) { newSpotName = "" }
         }
         .alert("Rename area", isPresented: $renaming) {
             TextField("Name", text: $renameText)
             Button("Save") {
                 let name = renameText.trimmingCharacters(in: .whitespaces)
-                if !name.isEmpty { area.name = name }
+                if !name.isEmpty { store.renameArea(area, to: name) }
             }
             Button("Cancel", role: .cancel) {}
         }
     }
 }
 
-struct LocationDetailView: View {
-    @Bindable var location: StorageLocation
+struct SpotDetailView: View {
+    @Environment(HouseholdStore.self) private var store
+    let spotId: String
     @State private var showingNewBin = false
 
-    private var sortedBins: [Bin] {
-        location.bins.sorted { $0.code.localizedStandardCompare($1.code) == .orderedAscending }
-    }
-
     var body: some View {
-        List {
-            if location.bins.isEmpty {
-                Text("No bins here yet.").foregroundStyle(.secondary)
+        if let spot = store.spot(spotId) {
+            let bins = store.bins(at: spot)
+            List {
+                if bins.isEmpty {
+                    Text("No bins here yet.").foregroundStyle(.secondary)
+                }
+                ForEach(bins) { bin in
+                    NavigationLink(value: BinRef(id: bin.id)) { BinRow(bin: bin) }
+                }
             }
-            ForEach(sortedBins) { bin in
-                NavigationLink(value: bin) { BinRow(bin: bin) }
+            .navigationTitle(spot.name)
+            .toolbar {
+                Button { showingNewBin = true } label: { Label("New bin here", systemImage: "plus") }
             }
+            .sheet(isPresented: $showingNewBin) {
+                BinEditorView(bin: nil, presetSpotId: spot.id)
+            }
+        } else {
+            ContentUnavailableView("Spot not found", systemImage: "mappin.slash")
         }
-        .navigationTitle(location.name)
-        .toolbar {
-            Button { showingNewBin = true } label: { Label("New bin here", systemImage: "plus") }
-        }
-        .sheet(isPresented: $showingNewBin) {
-            BinEditorView(bin: nil, presetLocation: location)
-        }
-    }
-}
-
-enum AreaSymbol {
-    static func guess(for name: String) -> String {
-        let n = name.lowercased()
-        if n.contains("garage") { return "car" }
-        if n.contains("basement") { return "stairs" }
-        if n.contains("attic") { return "house.lodge" }
-        if n.contains("closet") { return "cabinet" }
-        if n.contains("bed") { return "bed.double" }
-        if n.contains("kitchen") || n.contains("pantry") { return "refrigerator" }
-        if n.contains("office") { return "desktopcomputer" }
-        if n.contains("shed") || n.contains("yard") { return "tree" }
-        if n.contains("bath") { return "bathtub" }
-        return "square.grid.2x2"
     }
 }

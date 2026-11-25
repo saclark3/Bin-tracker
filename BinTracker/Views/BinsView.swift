@@ -1,5 +1,4 @@
 import SwiftUI
-import SwiftData
 
 enum BinSort: String, CaseIterable, Identifiable {
     case recent = "Recently used"
@@ -9,10 +8,9 @@ enum BinSort: String, CaseIterable, Identifiable {
 }
 
 struct BinsView: View {
-    @Environment(\.modelContext) private var context
-    @Query private var bins: [Bin]
+    @Environment(HouseholdStore.self) private var store
 
-    @State private var path: [Bin] = []
+    @State private var path: [BinRef] = []
     @State private var sort: BinSort = .recent
     @State private var jumpCode = ""
     @State private var jumpError: String?
@@ -24,8 +22,7 @@ struct BinsView: View {
             List {
                 Section {
                     HStack {
-                        Image(systemName: "number")
-                            .foregroundStyle(.secondary)
+                        Image(systemName: "number").foregroundStyle(.secondary)
                         TextField("Type a bin ID, e.g. B12 or 12", text: $jumpCode)
                             .textInputAutocapitalization(.characters)
                             .autocorrectionDisabled()
@@ -33,8 +30,7 @@ struct BinsView: View {
                             .submitLabel(.go)
                             .onSubmit(jump)
                         if !jumpCode.isEmpty {
-                            Button("Open", action: jump)
-                                .buttonStyle(.borderedProminent)
+                            Button("Open", action: jump).buttonStyle(.borderedProminent)
                         }
                     }
                     if let jumpError {
@@ -45,15 +41,18 @@ struct BinsView: View {
                 }
 
                 Section {
-                    if bins.isEmpty {
+                    if store.bins.isEmpty {
                         ContentUnavailableView("No bins yet",
                                                systemImage: "shippingbox",
                                                description: Text("Tap + to add your first bin. Write its ID on the box."))
                     }
                     ForEach(sortedBins) { bin in
-                        NavigationLink(value: bin) { BinRow(bin: bin) }
+                        NavigationLink(value: BinRef(id: bin.id)) { BinRow(bin: bin) }
                     }
-                    .onDelete(perform: delete)
+                    .onDelete { offsets in
+                        let list = sortedBins
+                        offsets.forEach { store.deleteBin(list[$0]) }
+                    }
                 } header: {
                     Picker("Sort", selection: $sort) {
                         ForEach(BinSort.allCases) { Text($0.rawValue).tag($0) }
@@ -64,14 +63,14 @@ struct BinsView: View {
                 }
             }
             .navigationTitle("Bins")
-            .navigationDestination(for: Bin.self) { BinDetailView(bin: $0) }
+            .navigationDestination(for: BinRef.self) { BinDetailView(binId: $0.id) }
             .toolbar {
                 ToolbarItem(placement: .primaryAction) {
                     Button { showingNewBin = true } label: { Label("New bin", systemImage: "plus") }
                 }
             }
             .sheet(isPresented: $showingNewBin) {
-                BinEditorView(bin: nil) { newBin in path.append(newBin) }
+                BinEditorView(bin: nil) { newId in path.append(BinRef(id: newId)) }
             }
             .onChange(of: jumpCode) { jumpError = nil }
         }
@@ -80,46 +79,40 @@ struct BinsView: View {
     private var sortedBins: [Bin] {
         switch sort {
         case .recent:
-            bins.sorted { ($0.lastAccessed ?? $0.createdAt) > ($1.lastAccessed ?? $1.createdAt) }
+            store.bins.sorted { ($0.lastAccessed ?? $0.createdAt) > ($1.lastAccessed ?? $1.createdAt) }
         case .frequent:
-            bins.sorted { $0.accessCount(sinceDaysAgo: 30) > $1.accessCount(sinceDaysAgo: 30) }
+            store.bins.sorted { store.accessCount($0, days: 30) > store.accessCount($1, days: 30) }
         case .code:
-            bins.sorted { $0.code.localizedStandardCompare($1.code) == .orderedAscending }
+            store.bins.sorted { $0.code.localizedStandardCompare($1.code) == .orderedAscending }
         }
     }
 
     private func jump() {
         guard !jumpCode.trimmingCharacters(in: .whitespaces).isEmpty else { return }
-        if let bin = BinCode.find(jumpCode, in: context) {
+        if let bin = store.find(code: jumpCode) {
             jumpCode = ""
             jumpFocused = false
-            path.append(bin)
+            path.append(BinRef(id: bin.id))
         } else {
             jumpError = "No bin with ID \(BinCode.lookupKey(jumpCode))."
         }
     }
-
-    private func delete(at offsets: IndexSet) {
-        let list = sortedBins
-        for i in offsets { context.delete(list[i]) }
-    }
 }
 
 struct BinRow: View {
+    @Environment(HouseholdStore.self) private var store
     let bin: Bin
 
     var body: some View {
         HStack(spacing: 12) {
             BinBadge(code: bin.code, colorName: bin.colorName)
             VStack(alignment: .leading, spacing: 2) {
-                Text(bin.name.isEmpty ? "Untitled bin" : bin.name).font(.headline)
-                Text(bin.locationPath).font(.subheadline).foregroundStyle(.secondary)
+                Text(bin.displayName).font(.headline)
+                Text(store.locationPath(of: bin)).font(.subheadline).foregroundStyle(.secondary)
                 HStack(spacing: 10) {
-                    Label("\(bin.items.count)", systemImage: "list.bullet")
-                    Label("\(bin.accessCount(sinceDaysAgo: 30))× in 30d", systemImage: "clock.arrow.circlepath")
-                    if let last = bin.lastAccessed {
-                        Text(last.relativeDescription)
-                    }
+                    Label("\(store.items(in: bin).count)", systemImage: "list.bullet")
+                    Label("\(store.accessCount(bin, days: 30))× in 30d", systemImage: "clock.arrow.circlepath")
+                    if let last = bin.lastAccessed { Text(last.relativeDescription) }
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
