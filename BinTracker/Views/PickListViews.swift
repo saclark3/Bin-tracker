@@ -103,12 +103,18 @@ struct PickListDetailView: View {
     }
 
     /// Bins grouped by area, so the list reads in the order you'd walk the house.
-    private func groups(_ list: PickList) -> [(area: String, bins: [Bin])] {
-        var result: [(area: String, bins: [Bin])] = []
+    private struct AreaGroup: Identifiable {
+        let area: String
+        var bins: [Bin]
+        var id: String { area }
+    }
+
+    private func groups(_ list: PickList) -> [AreaGroup] {
+        var result: [AreaGroup] = []
         for bin in store.bins(in: list) {
             let area = store.spot(bin.spotId).flatMap { store.area($0.areaId)?.name } ?? "No location"
             if let i = result.firstIndex(where: { $0.area == area }) { result[i].bins.append(bin) }
-            else { result.append((area, [bin])) }
+            else { result.append(AreaGroup(area: area, bins: [bin])) }
         }
         return result
     }
@@ -127,7 +133,7 @@ struct PickListDetailView: View {
                 Text("Tap a bin when you grab it, or an item when you pull it out. Checking off also counts as opening the bin.")
             }
 
-            ForEach(groups(list), id: \.area) { group in
+            ForEach(groups(list)) { group in
                 Section(group.area) {
                     ForEach(group.bins) { bin in
                         PickBinRow(list: list, bin: bin) { openBin = BinRef(id: $0.id) }
@@ -463,6 +469,6 @@ struct AddToPickListMenu<Label: View>: View {
             Button(action: onNewList) {
                 SwiftUI.Label("New pick list…", systemImage: "plus")
             }
-        } label: label
+        } label: { label() }
     }
 }
